@@ -3,8 +3,6 @@ import pandas as pd
 import requests
 import json
 import plotly.express as px
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 # DeepSeek API Key (store securely)
 DEEPSEEK_API_KEY = "sk-a2c6864177364872be1fb0831d5b567f"
@@ -143,7 +141,7 @@ if uploaded_file:
     st.dataframe(df)
 
     # Create Tabs for AI Insights and Chat with Data
-    tab1, tab2 = st.tabs(["🤖 AI Insights", "💬 Chat with Data"])
+    tab1, tab2, tab3 = st.tabs(["🤖 AI Insights", "📊 AI Auto-Plots", "💬 Chat with Data"])
 
     with tab1:
         st.subheader("🧠 AI-Generated Insights")
@@ -154,6 +152,16 @@ if uploaded_file:
                 st.markdown(f"**Insights:** {insights}")
 
     with tab2:
+        st.subheader("📊 AI-Driven Auto Plots")
+        if st.button("Generate AI Plots", key="plots"):
+            with st.spinner("AI is determining useful visualizations..."):
+                data_context = df.head(10).to_string()
+                instructions = get_ai_plot_instructions(data_context)
+                st.markdown("#### AI Plot Instructions:")
+                st.json(instructions)
+                generate_ai_plots(df, instructions)
+
+    with tab3:
         st.subheader("💬 Chat with Your Data")
         user_message = st.text_input("Ask a question about your dataset:")
         if st.button("Ask AI", key="chat"):
