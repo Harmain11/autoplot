@@ -140,7 +140,7 @@ user_message = st.text_input("💬 Ask a question about your dataset:")
 
 if st.button("Ask AI"):
     with st.spinner("Processing your query..."):
-        sample_data = df.head(10).to_string(index=False)
+        sample_data = df.to_string(index=False)
         # Get AI text response (insights)
         ai_response = chat_with_data(user_message, sample_data)
         st.markdown("### 🤖 AI Response")
