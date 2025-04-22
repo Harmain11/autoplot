@@ -116,8 +116,10 @@ if st.session_state.tokens_used + current_cost > monthly_cap[pricing_plan]:
 
 def chat_with_data(user_message, data_context):
     api_url = "https://api.deepseek.com/v1/chat/completions"
-    headers = {"Content-Type": "application/json",
-               "Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+    }
     messages = [
         {"role": "system", "content": "You are an AI assistant that answers questions about the dataset and provides insights and visualizations."},
         {"role": "user",   "content": f"{user_message}\n\nData:\n{data_context}"}
@@ -125,25 +127,34 @@ def chat_with_data(user_message, data_context):
     payload = {"model": "deepseek-chat", "messages": messages}
     response = requests.post(api_url, headers=headers, json=payload)
 
-    # If any API error (e.g., request too large), prompt to filter more
+    # Handle API errors, especially token limit exceeded
     if response.status_code != 200:
-        st.error("⚠ Data too large. Please apply more filters to reduce the data size and try again.")
-        return None
+        try:
+            err = response.json().get("error", {}).get("message", "Unknown error")
+        except json.JSONDecodeError:
+            err = response.text
+        if "exceed" in err.lower():
+            st.error("⚠ Token limit exceeded. Please apply more filters to reduce the data size and try again.")
+            return None
+        else:
+            st.error(f"⚠ API Error: {err}")
+            return None
 
-    # On success, deduct tokens and return content
     try:
         result = response.json()
         st.session_state.tokens_used += current_cost
         return result["choices"][0]["message"]["content"]
     except Exception:
-        st.error("⚠ Error processing AI response. Please apply more filters and try again.")
+        st.error("⚠ Error processing AI response.")
         return None
 
 
 def get_ai_plot_instructions(data_context, user_question):
     api_url = "https://api.deepseek.com/v1/chat/completions"
-    headers = {"Content-Type": "application/json",
-               "Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+    }
     prompt = f"""
 Analyze the dataset and, based on the following user question, determine the best visualizations that answer it.
 User Question: "{user_question}"
@@ -161,18 +172,25 @@ Here is a sample of the dataset:
     payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}]}
     response = requests.post(api_url, headers=headers, json=payload)
 
-    # If any API error (e.g., request too large), prompt to filter more
+    # Handle API errors, especially token limit exceeded
     if response.status_code != 200:
-        st.error("⚠ Data too large. Please apply more filters to reduce the data size and try again.")
-        return {"plots": []}
+        try:
+            err = response.json().get("error", {}).get("message", "Unknown error")
+        except json.JSONDecodeError:
+            err = response.text
+        if "exceed" in err.lower():
+            st.error("⚠ Token limit exceeded. Please apply more filters to reduce the data size and try again.")
+            return {"plots": []}
+        else:
+            st.error(f"⚠ API Error: {err}")
+            return {"plots": []}
 
-    # Parse JSON instructions
     try:
         text = response.json()["choices"][0]["message"]["content"]
         j = text[text.find("{"):text.rfind("}")+1]
         return json.loads(j)
     except Exception:
-        st.error("⚠ Error parsing plot instructions. Please apply more filters and try again.")
+        st.error("⚠ AI returned invalid plot instructions.")
         return {"plots": []}
 
 
@@ -217,5 +235,19 @@ user_question = st.text_input("Ask a question about the data:")
 if user_question:
     st.write(f"Question: {user_question}")
 
-    # Use only the filtered data for context & plotting\
+    # ——— Use only the filtered data for context & plotting ———
+    data_context = filtered_df.to_string(index=False)
+
+    # Chat response
+    ai_response = chat_with_data(user_question, data_context)
+    if ai_response is not None:
+        st.write(f"AI Response: {ai_response}")
+
+        # Visualization instructions + rendering
+        ai_plots = get_ai_plot_instructions(data_context, user_question)
+        if ai_plots.get("plots"):
+            generate_ai_plots(filtered_df, ai_plots)
+        else:
+            st.write("No plots available for this question.")
+
 
