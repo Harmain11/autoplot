@@ -52,7 +52,7 @@ if pricing_plan in ["Free", "Pricing 1"]:
     player_filter  = st.sidebar.selectbox("Select Player", options=player_options, index=0)
 
 elif pricing_plan == "Pricing 2":
-    sport_filter   = st.sidebar.multiselect("Sport", options=df["Sport"].unique())
+    sport_filter     = st.sidebar.multiselect("Sport", options=df["Sport"].unique())
     academics_filter = st.sidebar.multiselect("Academics", options=df["Academics"].unique())
     players          = sorted([n for n in df["Player Name"].unique() if isinstance(n, str)])
     player_options   = ["All"] + players
@@ -68,7 +68,6 @@ else:  # Pricing 3
 # Data Filtering
 # ----------------------------
 filtered_df = df.copy()
-
 # Apply common filters
 if region_filter:
     filtered_df = filtered_df[filtered_df["Region"].isin(region_filter)]
@@ -87,16 +86,16 @@ if academic_year_filter:
 if pricing_plan in ["Free", "Pricing 1", "Pricing 2"]:
     if sport_filter:
         filtered_df = filtered_df[filtered_df["Sport"].isin(sport_filter)]
-    if pricing_plan in ["Free", "Pricing 1", "Pricing 2"] and player_filter != "All":
+    if player_filter != "All":
         filtered_df = filtered_df[filtered_df["Player Name"] == player_filter]
-    
+
 elif pricing_plan == "Pricing 3":
     if sport_filter:
         filtered_df = filtered_df[filtered_df["Sport"].isin(sport_filter)]
     if academics_filter:
         filtered_df = filtered_df[filtered_df["Academics"].isin(academics_filter)]
-    all_players     = set(players)
-    selected_players = set(player_filter)
+    all_players       = set(players)
+    selected_players  = set(player_filter)
     if selected_players != all_players:
         filtered_df = filtered_df[filtered_df["Player Name"].isin(player_filter)]
 
@@ -114,31 +113,37 @@ if st.session_state.tokens_used + current_cost > monthly_cap[pricing_plan]:
 # ----------------------------
 # Functions for AI Responses & Visualizations
 # ----------------------------
+
 def chat_with_data(user_message, data_context):
     api_url = "https://api.deepseek.com/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
-    }
+    headers = {"Content-Type": "application/json",
+               "Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
     messages = [
         {"role": "system", "content": "You are an AI assistant that answers questions about the dataset and provides insights and visualizations."},
         {"role": "user",   "content": f"{user_message}\n\nData:\n{data_context}"}
     ]
     payload = {"model": "deepseek-chat", "messages": messages}
     response = requests.post(api_url, headers=headers, json=payload)
+
+    # If any API error (e.g., request too large), prompt to filter more
+    if response.status_code != 200:
+        st.error("⚠ Data too large. Please apply more filters to reduce the data size and try again.")
+        return None
+
+    # On success, deduct tokens and return content
     try:
         result = response.json()
+        st.session_state.tokens_used += current_cost
         return result["choices"][0]["message"]["content"]
     except Exception:
-        st.error("⚠ Error processing AI response.")
-        return "Error occurred while processing the response."
+        st.error("⚠ Error processing AI response. Please apply more filters and try again.")
+        return None
+
 
 def get_ai_plot_instructions(data_context, user_question):
     api_url = "https://api.deepseek.com/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
-    }
+    headers = {"Content-Type": "application/json",
+               "Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
     prompt = f"""
 Analyze the dataset and, based on the following user question, determine the best visualizations that answer it.
 User Question: "{user_question}"
@@ -155,17 +160,25 @@ Here is a sample of the dataset:
 """
     payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}]}
     response = requests.post(api_url, headers=headers, json=payload)
+
+    # If any API error (e.g., request too large), prompt to filter more
+    if response.status_code != 200:
+        st.error("⚠ Data too large. Please apply more filters to reduce the data size and try again.")
+        return {"plots": []}
+
+    # Parse JSON instructions
     try:
         text = response.json()["choices"][0]["message"]["content"]
         j = text[text.find("{"):text.rfind("}")+1]
         return json.loads(j)
     except Exception:
-        st.error("⚠ AI returned invalid plot instructions.")
+        st.error("⚠ Error parsing plot instructions. Please apply more filters and try again.")
         return {"plots": []}
+
 
 def generate_ai_plots(dataframe, instructions):
     for plot in instructions.get("plots", []):
-        p_type = plot.get("type","").lower()
+        p_type = plot.get("type","" ).lower()
         cols   = plot.get("columns",[])
         title  = plot.get("title","Untitled Plot")
         if not cols or any(c not in dataframe.columns for c in cols):
@@ -204,16 +217,5 @@ user_question = st.text_input("Ask a question about the data:")
 if user_question:
     st.write(f"Question: {user_question}")
 
-    # ——— Use only the filtered data for context & plotting ———
-    data_context = filtered_df.to_string(index=False)
+    # Use only the filtered data for context & plotting\
 
-    # Chat response
-    ai_response = chat_with_data(user_question, data_context)
-    st.write(f"AI Response: {ai_response}")
-
-    # Visualization instructions + rendering
-    ai_plots = get_ai_plot_instructions(data_context, user_question)
-    if ai_plots.get("plots"):
-        generate_ai_plots(filtered_df, ai_plots)
-    else:
-        st.write("No plots available for this question.")
